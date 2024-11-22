@@ -1,11 +1,7 @@
 mod app;
 use anyhow::Result;
 use app::App;
-use winit::{
-    dpi::PhysicalSize,
-    event_loop::{self, EventLoop},
-    window::WindowBuilder,
-};
+use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;

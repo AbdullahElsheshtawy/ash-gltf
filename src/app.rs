@@ -24,10 +24,7 @@ impl App {
     pub const LAYERS: [&CStr; 1] =
         [unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
 
-    pub const REQUIRED_EXTENSIONS: [*const i8; 2] = [
-        ash::khr::swapchain::NAME.as_ptr(),
-        ash::khr::dynamic_rendering::NAME.as_ptr(),
-    ];
+    pub const REQUIRED_EXTENSIONS: [*const i8; 1] = [ash::khr::swapchain::NAME.as_ptr()];
 
     pub fn new(window: winit::window::Window, event_loop: EventLoop<()>) -> Result<Self> {
         let entry = unsafe { ash::Entry::load() }?;
@@ -60,8 +57,10 @@ impl App {
                 | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
             message_type: vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                 | vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
             pfn_user_callback: Some(Self::debug_callback),
+
             ..Default::default()
         };
         let debug_messenger =
