@@ -1,22 +1,24 @@
 mod app;
 use anyhow::Result;
 use app::App;
-use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowAttributes};
+use winit::{
+    dpi::PhysicalSize,
+    event_loop::{self, EventLoop},
+    window::WindowBuilder,
+};
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
 fn main() -> Result<()> {
-    let env = env_logger::Env::default().filter_or("RUST_LOG", "trace");
-    env_logger::init_from_env(env);
+    env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "trace"));
     let event_loop = EventLoop::new()?;
-    let window_attribs = WindowAttributes::default()
+    let window = WindowBuilder::new()
         .with_inner_size(PhysicalSize::new(WIDTH, HEIGHT))
         .with_title("Hello, Vulkan");
+    let app = App::new(window.build(&event_loop)?, event_loop)?;
 
-    let mut app = App::new(window_attribs);
-
-    event_loop.run_app(&mut app)?;
+    app.run()?;
 
     Ok(())
 }
