@@ -2,9 +2,9 @@ use anyhow::Result;
 use ash::vk;
 
 pub struct SwapchainSupportDetails {
-    caps: vk::SurfaceCapabilitiesKHR,
-    formats: Vec<vk::SurfaceFormatKHR>,
-    present_modes: Vec<vk::PresentModeKHR>,
+    pub caps: vk::SurfaceCapabilitiesKHR,
+    pub formats: Vec<vk::SurfaceFormatKHR>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
 }
 
 impl SwapchainSupportDetails {

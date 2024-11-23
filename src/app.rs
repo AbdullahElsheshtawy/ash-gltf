@@ -20,7 +20,6 @@ pub struct App {
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
     surface: Surface,
-    event_loop: EventLoop<()>,
     swapchain: Swapchain,
     frames: Vec<frame::Frame>,
     window: winit::window::Window,
@@ -33,7 +32,7 @@ impl App {
         [unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
     pub const REQUIRED_EXTENSIONS: [*const i8; 1] = [ash::khr::swapchain::NAME.as_ptr()];
 
-    pub fn new(window: winit::window::Window, event_loop: EventLoop<()>) -> Result<Self> {
+    pub fn new(window: winit::window::Window) -> Result<Self> {
         let entry = unsafe { ash::Entry::load() }?;
         let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3);
         let layer_names: Vec<*const i8> = if Self::VALIDATION {
@@ -46,21 +45,19 @@ impl App {
         let mut extension_names: Vec<&CStr> =
             ash_window::enumerate_required_extensions(window.display_handle()?.as_raw())?
                 .iter()
-                .map(|ext| unsafe { CStr::from_ptr(ext.clone()) })
+                .map(|ext| unsafe { CStr::from_ptr(*ext) })
                 .collect::<Vec<&CStr>>();
         if Self::VALIDATION {
             extension_names.push(debug_extensions);
         }
         let names: Vec<*const i8> = extension_names.iter().map(|name| name.as_ptr()).collect();
 
-        dbg!(&names);
-        dbg!(&extension_names);
         let instance_info = vk::InstanceCreateInfo {
-            p_application_info: &app_info.into(),
+            p_application_info: &app_info,
             enabled_layer_count: layer_names.len() as u32,
             pp_enabled_layer_names: layer_names.as_ptr().cast(),
             enabled_extension_count: names.len() as u32,
-            pp_enabled_extension_names: (&names).as_ptr(),
+            pp_enabled_extension_names: names.as_ptr(),
             ..Default::default()
         };
         let instance = unsafe { entry.create_instance(&instance_info, None) }?;
@@ -130,7 +127,7 @@ impl App {
             &surface.instance,
         )?;
         let mut frames = Vec::with_capacity(Self::FRAMES_IN_FLIGHT as usize);
-        (0..Self::FRAMES_IN_FLIGHT).into_iter().for_each(|_| {
+        (0..Self::FRAMES_IN_FLIGHT).for_each(|_| {
             frames.push(
                 frame::Frame::new(
                     &device,
@@ -153,7 +150,6 @@ impl App {
             device,
             window,
             debug_instance,
-            event_loop,
             surface,
             swapchain,
             frames,
@@ -202,9 +198,8 @@ impl App {
         None
     }
 
-    pub fn run(self) -> Result<()> {
-        Ok(self
-            .event_loop
+    pub fn run(&mut self, event_loop: EventLoop<()>) {
+        event_loop
             .run(move |event, control_flow| match event {
                 winit::event::Event::WindowEvent {
                     ref event,
@@ -244,11 +239,43 @@ impl App {
                     }
                 }
                 _ => {}
-            })?)
+            })
+            .unwrap();
     }
 }
 
 struct Surface {
     instance: ash::khr::surface::Instance,
     surface: vk::SurfaceKHR,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        unsafe {
+            for view in &self.swapchain.image_views {
+                self.device.destroy_image_view(*view, None);
+            }
+
+            if self.debug_instance.is_some() {
+                self.debug_instance
+                    .as_ref()
+                    .unwrap()
+                    .destroy_debug_utils_messenger(self.debug_messenger.unwrap(), None);
+            }
+
+            for frame in &self.frames {
+                self.device.destroy_semaphore(frame.swapchain_sem, None);
+                self.device.destroy_semaphore(frame.rendering_sem, None);
+                self.device.destroy_command_pool(frame.command_pool, None);
+            }
+            self.swapchain
+                .device
+                .destroy_swapchain(self.swapchain.swapchain, None);
+            self.device.destroy_device(None);
+            self.surface
+                .instance
+                .destroy_surface(self.surface.surface, None);
+            self.instance.destroy_instance(None);
+        }
+    }
 }
