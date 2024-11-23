@@ -8,6 +8,9 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
 };
+mod swapchain;
+use swapchain::Swapchain;
+mod frame;
 
 pub struct App {
     entry: ash::Entry,
@@ -16,11 +19,15 @@ pub struct App {
     debug_messenger: vk::DebugUtilsMessengerEXT,
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
+    surface: Surface,
     event_loop: EventLoop<()>,
+    swapchain: Swapchain,
+    frames: Vec<frame::Frame>,
     window: winit::window::Window,
 }
 
 impl App {
+    pub const FRAMES_IN_FLIGHT: u32 = 2;
     pub const LAYERS: [&CStr; 1] =
         [unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
 
@@ -80,19 +87,47 @@ impl App {
                 )
             }?,
         };
+
         let features = unsafe { instance.get_physical_device_features(physical_device) };
         let queue_info = [vk::DeviceQueueCreateInfo::default()
             .queue_priorities(&[1.0])
             .queue_family_index(
-                Self::find_queue_family_indicies(&instance, physical_device, &surface)?
-                    .graphics
-                    .unwrap(),
+                Self::find_queue_family_indicies(
+                    &instance,
+                    physical_device,
+                    vk::QueueFlags::GRAPHICS,
+                )
+                .unwrap(),
             )];
         let device_info = vk::DeviceCreateInfo::default()
             .enabled_extension_names(&Self::REQUIRED_EXTENSIONS)
             .queue_create_infos(&queue_info)
             .enabled_features(&features);
         let device = unsafe { instance.create_device(physical_device, &device_info, None) }?;
+        let swapchain = Swapchain::new(
+            &instance,
+            &device,
+            physical_device,
+            surface.surface,
+            &surface.instance,
+        )?;
+            let mut frames = Vec::with_capacity(Self::FRAMES_IN_FLIGHT as usize);
+            (0..Self::FRAMES_IN_FLIGHT).into_iter().for_each(|_| {
+                frames.push(
+                    frame::Frame::new(
+                        &device,
+                        Self::find_queue_family_indicies(
+                            &instance,
+                            physical_device,
+                            vk::QueueFlags::GRAPHICS,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                )
+            });
+        };
+
         Ok(Self {
             entry,
             instance,
@@ -102,6 +137,9 @@ impl App {
             window,
             debug_instance,
             event_loop,
+            surface,
+            swapchain,
+            frames,
         })
     }
     fn pick_physical_device(instance: &ash::Instance) -> Result<vk::PhysicalDevice> {
@@ -133,33 +171,18 @@ impl App {
     fn find_queue_family_indicies(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
-        surface: &Surface,
-    ) -> Result<QueueFamilyIndices> {
+        queue_type: vk::QueueFlags,
+    ) -> Option<u32> {
         let properties =
             unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
 
-        let mut indices = QueueFamilyIndices::default();
-
         for (i, family) in properties.iter().enumerate() {
-            if family.queue_count > 0 && family.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-                indices.graphics = Some(i as u32);
-            }
-            if unsafe {
-                surface.instance.get_physical_device_surface_support(
-                    physical_device,
-                    i as u32,
-                    surface.surface,
-                )
-            }? {
-                indices.present = Some(i as u32);
-            }
-
-            if indices.is_completed() {
-                break;
+            if family.queue_count > 0 && family.queue_flags.contains(queue_type) {
+                return Some(i as u32);
             }
         }
 
-        Ok(indices)
+        None
     }
 
     pub fn run(self) -> Result<()> {
@@ -211,15 +234,4 @@ impl App {
 struct Surface {
     instance: ash::khr::surface::Instance,
     surface: vk::SurfaceKHR,
-}
-
-#[derive(Debug, Default)]
-struct QueueFamilyIndices {
-    graphics: Option<u32>,
-    present: Option<u32>,
-}
-impl QueueFamilyIndices {
-    fn is_completed(&self) -> bool {
-        self.graphics.is_some() && self.present.is_some()
-    }
 }
