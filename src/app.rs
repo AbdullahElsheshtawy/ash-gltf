@@ -15,8 +15,8 @@ mod frame;
 pub struct App {
     entry: ash::Entry,
     instance: ash::Instance,
-    debug_instance: ash::ext::debug_utils::Instance,
-    debug_messenger: vk::DebugUtilsMessengerEXT,
+    debug_instance: Option<ash::ext::debug_utils::Instance>,
+    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
     surface: Surface,
@@ -27,51 +27,69 @@ pub struct App {
 }
 
 impl App {
+    pub const VALIDATION: bool = true;
     pub const FRAMES_IN_FLIGHT: u32 = 2;
     pub const LAYERS: [&CStr; 1] =
         [unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
-
     pub const REQUIRED_EXTENSIONS: [*const i8; 1] = [ash::khr::swapchain::NAME.as_ptr()];
 
     pub fn new(window: winit::window::Window, event_loop: EventLoop<()>) -> Result<Self> {
         let entry = unsafe { ash::Entry::load() }?;
         let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3);
-        let layer_names: Vec<_> = Self::LAYERS.iter().map(|name| name.as_ptr()).collect();
+        let layer_names: Vec<*const i8> = if Self::VALIDATION {
+            Self::LAYERS.iter().map(|name| name.as_ptr()).collect()
+        } else {
+            vec![]
+        };
+
         let debug_extensions = ash::ext::debug_utils::NAME;
         let mut extension_names: Vec<&CStr> =
             ash_window::enumerate_required_extensions(window.display_handle()?.as_raw())?
                 .iter()
                 .map(|ext| unsafe { CStr::from_ptr(ext.clone()) })
                 .collect::<Vec<&CStr>>();
-        extension_names.push(debug_extensions);
-        let mut names: Vec<*const i8> = Vec::with_capacity(extension_names.len());
-        {
-            for name in extension_names {
-                names.push(name.as_ptr());
-            }
+        if Self::VALIDATION {
+            extension_names.push(debug_extensions);
         }
-        let instance_info = vk::InstanceCreateInfo::default()
-            .application_info(&app_info)
-            .enabled_layer_names(&layer_names)
-            .enabled_extension_names(&names);
-        let instance = unsafe { entry.create_instance(&instance_info, None) }?;
+        let names: Vec<*const i8> = extension_names.iter().map(|name| name.as_ptr()).collect();
 
-        let debug_instance = ash::ext::debug_utils::Instance::new(&entry, &instance);
-        let debug_info = vk::DebugUtilsMessengerCreateInfoEXT {
-            message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-            message_type: vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                | vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
-            pfn_user_callback: Some(Self::debug_callback),
-
+        dbg!(&names);
+        dbg!(&extension_names);
+        let instance_info = vk::InstanceCreateInfo {
+            p_application_info: &app_info.into(),
+            enabled_layer_count: layer_names.len() as u32,
+            pp_enabled_layer_names: layer_names.as_ptr().cast(),
+            enabled_extension_count: names.len() as u32,
+            pp_enabled_extension_names: (&names).as_ptr(),
             ..Default::default()
         };
-        let debug_messenger =
-            unsafe { debug_instance.create_debug_utils_messenger(&debug_info, None) }?;
+        let instance = unsafe { entry.create_instance(&instance_info, None) }?;
+
+        let (debug_instance, debug_messenger) = if Self::VALIDATION {
+            let debug_instance = Some(ash::ext::debug_utils::Instance::new(&entry, &instance));
+            let debug_info = vk::DebugUtilsMessengerCreateInfoEXT {
+                message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                message_type: vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                    | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
+                pfn_user_callback: Some(Self::debug_callback),
+
+                ..Default::default()
+            };
+            let debug_messenger = Some(unsafe {
+                debug_instance
+                    .clone()
+                    .unwrap()
+                    .create_debug_utils_messenger(&debug_info, None)
+            }?);
+            (debug_instance, debug_messenger)
+        } else {
+            (None, None)
+        };
 
         let physical_device = Self::pick_physical_device(&instance)?;
 
@@ -111,22 +129,21 @@ impl App {
             surface.surface,
             &surface.instance,
         )?;
-            let mut frames = Vec::with_capacity(Self::FRAMES_IN_FLIGHT as usize);
-            (0..Self::FRAMES_IN_FLIGHT).into_iter().for_each(|_| {
-                frames.push(
-                    frame::Frame::new(
-                        &device,
-                        Self::find_queue_family_indicies(
-                            &instance,
-                            physical_device,
-                            vk::QueueFlags::GRAPHICS,
-                        )
-                        .unwrap(),
+        let mut frames = Vec::with_capacity(Self::FRAMES_IN_FLIGHT as usize);
+        (0..Self::FRAMES_IN_FLIGHT).into_iter().for_each(|_| {
+            frames.push(
+                frame::Frame::new(
+                    &device,
+                    Self::find_queue_family_indicies(
+                        &instance,
+                        physical_device,
+                        vk::QueueFlags::GRAPHICS,
                     )
                     .unwrap(),
                 )
-            });
-        };
+                .unwrap(),
+            )
+        });
 
         Ok(Self {
             entry,
